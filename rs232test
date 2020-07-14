@@ -1,0 +1,180 @@
+#include "rs232.h"
+#include <fcntl.h>   /* File control definitions */
+#include <netdb.h> /* getprotobyname */
+#include "md5.h"
+#include "md5.c"
+#include <time.h>
+
+
+int main( int argc, char *argv[] )
+{	
+	/*
+	Jei neuzkomentuoti md5 hash metodai:
+	*tikrinam ar gautas paketas(jei taip, tai repMess=1.)
+	*tikrinam ar sutampa MD5(jei taip, tai respMess=0.)
+	*respMess= x. by default
+
+	Priesingu atveju:
+	*tikrinam ar gautas paketas(jei taip, tai repMess=0.)
+	*respMess= x. by default
+	*/
+
+	system("/bin/stty -F /dev/ttyUSB0 115200 cs8 -parenb -parodd -cstopb -crtscts -ixon -ixoff -echo");
+	receiver();
+
+	return(0);
+}
+
+void receiver(){
+
+	char *rd= (char*)malloc(1); short rdNum;
+	int length=0; short count=0;
+	char *respMess= (char*)malloc(2);
+	respMess= "x.";
+
+    int SPort =open("/dev/ttyUSB0", O_RDWR | O_NONBLOCK, 0666);
+		if (SPort == -1)
+		{
+			perror("open_port: Unable to open /dev/ttyUSB0 - ");
+			return -1;
+		}
+
+	while(1){
+		if(read(SPort, rd, 1)>0){	
+
+			//printf("rd: %s\n", rd);
+			rdNum= (int) strtol(rd, (char **)NULL, 10);		
+			count++;
+			length=length*10+rdNum;
+
+			if(length > 0 && count==3){
+				//char RESP_MD5[33];
+				//char MD5[33]; //hashing value
+				char *num; char *text;
+				char *numText;
+				int numL, textL;
+
+				printf("---------------------------------------------\n");
+				printf("buff length: %d\n", length);
+				//respMess="1."; //if using md5 hashing
+				respMess="0.";
+
+				char buff[length];
+				char NL[2]; char TL[3];
+
+				while(strlen(buff)!= length){
+					buff[0]= '\0';
+					read(SPort, buff, length);
+				}
+
+				printf("buffer: %s\n", buff);
+
+				strncpy(NL, buff, 2);
+				strncpy(TL, buff+2, 3);
+				numL= (int) strtol(NL, (char **)NULL, 10);
+				textL= (int) strtol(TL, (char **)NULL, 10);
+
+				num= (char*)malloc(numL+1);
+				text= (char*)malloc(textL+4);
+				memset(num, 0, sizeof num);
+				memset(text, 0, sizeof text);
+
+				num[0]= NULL; text[0]= NULL;
+
+				strncpy(num, buff+5, numL);
+				strncpy(text, buff+5+numL, textL);
+				//strncpy(MD5, buff+5+numL+textL, 32);
+
+				num[numL]=NULL;
+				text[textL]=NULL;
+
+				numText= (char*)malloc(numL+textL); //creating number+text char pointer
+				memset(numText, 0, sizeof numText);
+				numText[0]=NULL;
+				strcpy(numText, num);
+  			    strcat(numText, text);
+				numText[numL+textL]=NULL;
+
+				printf("num: %s length: %d\n", num, strlen(num));
+				printf("text: %s length: %d\n", text, strlen(text));
+				//printf("Received MD5: %s\n", MD5);
+
+				/*MD5_KEY(numText, RESP_MD5);
+
+				if(strcmp(MD5,RESP_MD5)==0)
+					respMess="0.";*/
+
+				printf("\nMessage received\n");
+
+				response(SPort, respMess);
+				printf("---------------------------------------------\n");
+
+				count=0; length=0;
+				free(num); free(text);
+				free(numText);
+				memset(buff, 0, sizeof buff);
+				//memset(MD5, 0, sizeof MD5);
+				//memset(RESP_MD5, 0, sizeof RESP_MD5);
+
+				//if(sms_sender_ENABLED)
+				//siusti per socketa data i gsmListener.c
+			}
+		}
+	}
+}
+
+/*void MD5_KEY(char *str, char *MD5) { // MD5 algorithm
+
+	int n;
+	unsigned char digest[16];
+
+	MD5_CTX ctx;
+    MD5Init(&ctx);
+    MD5Update(&ctx, str, strlen(str));
+    MD5Final(digest, &ctx);
+
+	for (n = 0; n < 32; ++n) {
+        printf("%02x", (unsigned int)digest[n]);
+    }
+	for (n = 0; n < 16; ++n) {
+        snprintf(&(MD5[n*2]), 16*2, "%02x", (unsigned int)digest[n]);
+    }
+
+	memset(digest, 0, sizeof digest);
+	printf("\nHash string: %s", str);
+	printf("\nMD5 hashing: %s\n", MD5);
+}*/
+
+void response(int SPort, char *respMess){
+
+	time_t begin, end;
+    double time_spent= 0;
+	char exitMess[150];
+
+	time(&begin);
+
+	printf("\nSent to sender: %s", respMess);
+
+    while(time_spent < 5){
+		write(SPort, respMess, 2);
+		write(SPort, "\n", 1);
+
+		time(&end);
+		time_spent= difftime(end, begin);
+	}
+
+	time_spent= 0;
+	time(&begin);
+
+	printf("\nWaiting for response:");
+
+	while(time_spent < 2){
+		if(read(SPort, exitMess, 50)>1){
+			printf("%s\n", exitMess);
+		}
+		time(&end);
+		time_spent= difftime(end, begin);
+	}
+
+	memset(exitMess, 0, sizeof exitMess);
+}
